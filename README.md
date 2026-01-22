@@ -1,453 +1,432 @@
-# monthlypolls.github.io
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MonthlyPolls | Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
-        
-        :root {
-            --primary: #10b981;
-            --primary-glow: rgba(16, 185, 129, 0.15);
-        }
+// linguist-language: JavaScript
+import React, { useState, useEffect } from 'react';
+import { 
+  Plus, 
+  Trash2, 
+  BarChart3, 
+  CheckCircle2, 
+  Clock, 
+  Settings2,
+  ChevronRight,
+  Archive,
+  Lock,
+  Unlock,
+  AlertCircle,
+  X
+} from 'lucide-react';
 
-        body { 
-            font-family: 'Plus Jakarta Sans', sans-serif; 
-            background-color: #f8fafc;
-            background-image: radial-gradient(at 0% 0%, hsla(161,73%,95%,1) 0, transparent 50%), 
-                              radial-gradient(at 100% 100%, hsla(210,100%,96%,1) 0, transparent 50%);
-        }
+// --- Supabase Configuration ---
+const SUPABASE_URL = 'https://zhwjrgkkucmifdalcgsg.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_T83Yr-DRdL2ZiqCSu2Fnjw_soVm-wMG';
 
-        .glass {
-            background: rgba(255, 255, 255, 0.7);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.5);
-        }
+const getSupabase = () => {
+  if (window.supabase) {
+    return window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+  return null;
+};
 
-        .poll-card {
-            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
+export default function App() {
+  const [supabase, setSupabase] = useState(null);
+  const [polls, setPolls] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [errorState, setErrorState] = useState(null);
+  const [votedPolls, setVotedPolls] = useState(new Set());
+  
+  const [newQuestion, setNewQuestion] = useState('');
+  const [newOptions, setNewOptions] = useState(['', '']);
+  const [view, setView] = useState('active');
 
-        .poll-card:hover {
-            transform: translateY(-6px);
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.05), 0 10px 10px -5px rgba(0, 0, 0, 0.02);
-        }
+  const handleAdminAuth = (e) => {
+    e.preventDefault();
+    if (adminPassword === 'Smith123') {
+      setIsAdmin(true);
+      setShowAdminLogin(false);
+      setAdminPassword('');
+      setErrorState(null);
+    } else {
+      setErrorState("Incorrect Admin Password");
+    }
+  };
 
-        .progress-fill {
-            transition: width 1.2s cubic-bezier(0.65, 0, 0.35, 1);
-        }
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+    script.async = true;
+    script.onload = () => {
+      setSupabase(getSupabase());
+    };
+    document.body.appendChild(script);
+  }, []);
 
-        .btn-primary {
-            background: linear-gradient(135deg, #059669 0%, #10b981 100%);
-            transition: all 0.2s ease;
-        }
+  useEffect(() => {
+    if (!supabase) return;
 
-        .btn-primary:hover {
-            filter: brightness(1.1);
-            transform: translateY(-1px);
-            box-shadow: 0 10px 15px -3px var(--primary-glow);
-        }
+    fetchPolls();
 
-        @keyframes slideUp {
-            from { transform: translateY(100%); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'polls' },
+        () => fetchPolls()
+      )
+      .subscribe();
 
-        .cookie-banner {
-            animation: slideUp 0.5s ease-out forwards;
-        }
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [supabase]);
 
-        .admin-glow {
-            box-shadow: 0 0 20px rgba(16, 185, 129, 0.2);
-            border: 2px solid #10b981 !important;
-        }
-    </style>
-</head>
-<body class="text-slate-900 min-h-screen pb-32">
+  const fetchPolls = async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase
+      .from('polls')
+      .select('*')
+      .order('created_at', { ascending: false });
 
-    <!-- Admin Login Modal -->
-    <div id="admin-modal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[500] flex items-center justify-center p-6">
-        <div class="bg-white rounded-[2.5rem] p-8 w-full max-w-md shadow-2xl scale-95 opacity-0 transition-all duration-300" id="modal-content">
-            <div class="flex justify-between items-center mb-6">
-                <div class="bg-emerald-100 p-3 rounded-2xl text-emerald-600">
-                    <i data-lucide="shield-check" class="w-6 h-6"></i>
-                </div>
-                <button onclick="closeAdminModal()" class="p-2 hover:bg-slate-100 rounded-full transition-colors">
-                    <i data-lucide="x" class="w-5 h-5 text-slate-400"></i>
-                </button>
-            </div>
-            <h3 class="text-2xl font-extrabold text-slate-900 mb-2">Admin Access</h3>
-            <p class="text-slate-500 text-sm mb-6">Please enter your password to unlock the engagement tools.</p>
-            
-            <div class="space-y-4">
-                <input type="password" id="admin-pass-input" placeholder="Password" class="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-4 focus:ring-emerald-100 transition-all font-bold">
-                <button onclick="verifyAdmin()" class="btn-primary w-full py-4 rounded-2xl text-white font-black shadow-lg">Unlock Dashboard</button>
-            </div>
+    if (error) {
+      console.error('Error fetching:', error);
+      setErrorState(error.message);
+    } else {
+      setPolls(data || []);
+      setErrorState(null);
+    }
+    setLoading(false);
+  };
+
+  const createPoll = async () => {
+    if (!supabase || !newQuestion.trim() || newOptions.some(opt => !opt.trim())) return;
+
+    const pollData = {
+      question: newQuestion,
+      options: newOptions.filter(o => o.trim()).map(text => ({ text, votes: 0 })),
+      active: true,
+      total_votes: 0,
+      month: new Date().toLocaleString('default', { month: 'long', year: 'numeric' })
+    };
+
+    const { error } = await supabase.from('polls').insert([pollData]);
+    if (error) {
+      setErrorState("Failed to create poll.");
+    } else {
+      setNewQuestion('');
+      setNewOptions(['', '']);
+      fetchPolls();
+    }
+  };
+
+  const handleVote = async (pollId, optionIndex) => {
+    if (!supabase || votedPolls.has(pollId)) return;
+
+    const poll = polls.find(p => p.id === pollId);
+    const updatedOptions = [...poll.options];
+    updatedOptions[optionIndex].votes += 1;
+
+    const { error } = await supabase
+      .from('polls')
+      .update({ 
+        options: updatedOptions, 
+        total_votes: (poll.total_votes || 0) + 1 
+      })
+      .eq('id', pollId);
+
+    if (!error) {
+      setVotedPolls(prev => new Set(prev).add(pollId));
+    }
+  };
+
+  const togglePollStatus = async (pollId, currentStatus) => {
+    if (!supabase) return;
+    await supabase
+      .from('polls')
+      .update({ active: !currentStatus })
+      .eq('id', pollId);
+  };
+
+  const deletePoll = async (pollId) => {
+    if (!supabase) return;
+    await supabase.from('polls').delete().eq('id', pollId);
+  };
+
+  const addOptionField = () => setNewOptions([...newOptions, '']);
+  const updateOptionText = (index, val) => {
+    const next = [...newOptions];
+    next[index] = val;
+    setNewOptions(next);
+  };
+
+  const activePolls = polls.filter(p => p.active);
+  const archivedPolls = polls.filter(p => !p.active);
+
+  if (!supabase && loading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-emerald-600 mx-auto mb-4"></div>
+          <p className="text-slate-500 font-medium">Connecting to services...</p>
         </div>
-    </div>
+      </div>
+    );
+  }
 
-    <!-- Global Layout -->
-    <div id="app" class="max-w-6xl mx-auto px-6 py-10">
-        
-        <!-- Header -->
-        <header class="flex flex-col md:flex-row md:items-end justify-between gap-8 mb-16">
-            <div class="space-y-3">
-                <div class="inline-flex items-center gap-2 bg-emerald-100/50 text-emerald-700 px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-widest border border-emerald-200">
-                    <span class="relative flex h-2 w-2">
-                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                        <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-                    </span>
-                    Live Community Hub
-                </div>
-                <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight text-slate-900">
-                    Monthly<span class="text-transparent bg-clip-text bg-gradient-to-r from-emerald-600 to-teal-500">Polls</span>
-                </h1>
-                <p class="text-slate-500 font-medium text-lg">Discover what your community is thinking today.</p>
-            </div>
-            
-            <div class="flex items-center gap-4">
-                <div onclick="showManualLocation()" class="cursor-pointer flex items-center gap-3 bg-white border border-slate-200 px-4 py-2.5 rounded-2xl shadow-sm hover:border-emerald-300 transition-all">
-                    <div id="loc-indicator-dot" class="w-2.5 h-2.5 rounded-full bg-slate-300"></div>
-                    <div class="flex flex-col">
-                        <span class="text-[9px] font-black text-slate-400 uppercase tracking-tighter">Current Region</span>
-                        <span id="loc-text" class="text-xs font-bold text-slate-700">Detecting...</span>
-                    </div>
-                </div>
-
-                <div class="flex bg-slate-200/50 p-1.5 rounded-2xl border border-slate-200">
-                    <button onclick="setView('active')" id="btn-active" class="px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all bg-white text-slate-900 shadow-sm">Active</button>
-                    <button onclick="setView('archive')" id="btn-archive" class="px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all text-slate-500 hover:text-slate-700">Archive</button>
-                </div>
-
-                <button onclick="openAdminModal()" id="admin-trigger" class="p-3 bg-slate-900 text-white rounded-2xl hover:bg-emerald-600 transition-all shadow-lg">
-                    <i data-lucide="shield-check" class="w-5 h-5"></i>
-                </button>
-            </div>
-        </header>
-
-        <main class="grid grid-cols-12 gap-10">
-            <!-- Admin Panel -->
-            <section id="admin-panel" class="hidden col-span-12 glass admin-glow rounded-[2.5rem] p-10 border border-emerald-100 mb-4 animate-in fade-in slide-in-from-top-4 duration-500">
-                <div class="flex items-center justify-between mb-10">
-                    <div class="flex items-center gap-3">
-                        <h2 class="text-2xl font-extrabold text-slate-900">Create Engagement</h2>
-                        <span class="px-2 py-1 bg-emerald-100 text-emerald-700 text-[10px] font-black rounded-lg">ADMIN MODE</span>
-                    </div>
-                    <button onclick="logoutAdmin()" class="text-[10px] font-bold text-rose-500 uppercase tracking-widest hover:underline">Logout</button>
-                </div>
-                
-                <div class="grid md:grid-cols-2 gap-8">
-                    <div class="space-y-6">
-                        <textarea id="poll-question" rows="3" placeholder="What's your question?" class="w-full p-5 bg-white border border-slate-200 rounded-3xl outline-none focus:ring-4 focus:ring-emerald-100 text-lg font-semibold"></textarea>
-                        <div class="grid grid-cols-2 gap-4">
-                            <select id="country-restrict" class="w-full p-4 bg-white border border-slate-200 rounded-2xl text-sm font-bold">
-                                <option value="">Global</option>
-                                <option value="GB">UK 🇬🇧</option>
-                                <option value="US">USA 🇺🇸</option>
-                            </select>
-                            <input type="text" id="poll-month" placeholder="Category (e.g. March 2024)" class="w-full p-4 bg-white border border-slate-200 rounded-2xl text-sm font-bold">
-                        </div>
-                    </div>
-                    <div id="poll-options-container" class="space-y-3">
-                        <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Options</label>
-                        <input type="text" placeholder="Option 1" class="poll-option-input w-full p-4 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500">
-                        <input type="text" placeholder="Option 2" class="poll-option-input w-full p-4 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500">
-                        <button onclick="addOptionField()" class="text-xs font-extrabold text-emerald-600">+ Add Option</button>
-                    </div>
-                </div>
-                <button id="submit-poll-btn" onclick="createPoll()" class="btn-primary w-full py-5 mt-10 rounded-3xl text-white font-black text-xl shadow-xl">Launch Poll to Site</button>
-            </section>
-
-            <!-- Polls List -->
-            <div id="polls-list" class="col-span-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                <div class="col-span-full py-40 flex flex-col items-center justify-center text-slate-400">
-                    <div class="w-12 h-12 border-4 border-emerald-100 border-t-emerald-500 rounded-full animate-spin mb-4"></div>
-                    <span class="font-black uppercase tracking-widest text-xs">Syncing...</span>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <!-- Persistent Cookie Consent -->
-    <div id="cookie-banner" class="hidden fixed bottom-8 left-1/2 -translate-x-1/2 w-[90%] max-w-2xl z-[300]">
-        <div class="glass border border-slate-200 p-6 rounded-[2rem] shadow-2xl flex flex-col md:flex-row items-center gap-6">
-            <div class="bg-emerald-100 p-4 rounded-2xl text-emerald-600">
-                <i data-lucide="cookie" class="w-8 h-8"></i>
-            </div>
-            <div class="flex-1 text-center md:text-left">
-                <h4 class="font-black text-slate-900">Vote Eligibility Tracking</h4>
-                <p class="text-sm text-slate-500 font-medium leading-relaxed">We use essential tracking to ensure you don't vote twice. Declining will disable voting functionality.</p>
-            </div>
-            <div class="flex gap-3 w-full md:w-auto">
-                <button onclick="handleCookie(false)" class="flex-1 md:px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-xl font-bold text-sm transition-all">Decline</button>
-                <button onclick="handleCookie(true)" class="flex-1 md:px-6 py-3 bg-slate-900 hover:bg-black text-white rounded-xl font-bold text-sm transition-all shadow-lg">Accept & Vote</button>
-            </div>
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 md:p-8">
+      {/* Header */}
+      <header className="max-w-4xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-4 mb-10">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight text-emerald-600 flex items-center gap-2">
+            <BarChart3 className="w-8 h-8" />
+            MonthlyPolls
+          </h1>
+          <p className="text-slate-500 mt-1">Manage your community engagement.</p>
         </div>
-    </div>
+        
+        <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setView('active')}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${view === 'active' ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-slate-600 shadow-sm border border-slate-200'}`}
+          >
+            Active
+          </button>
+          <button 
+            onClick={() => setView('archive')}
+            className={`px-4 py-2 rounded-full text-sm font-medium transition-all ${view === 'archive' ? 'bg-emerald-600 text-white shadow-md' : 'bg-white text-slate-600 shadow-sm border border-slate-200'}`}
+          >
+            Archives
+          </button>
+          <div className="h-6 w-[1px] bg-slate-300 mx-1" />
+          <button 
+            onClick={() => isAdmin ? setIsAdmin(false) : setShowAdminLogin(true)}
+            className={`p-2 rounded-full transition-all border ${isAdmin ? 'bg-orange-100 border-orange-200 text-orange-600' : 'bg-white border-slate-200 text-slate-400 hover:border-emerald-500'}`}
+            title={isAdmin ? "Logout Admin" : "Admin Login"}
+          >
+            {isAdmin ? <Unlock className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
+          </button>
+        </div>
+      </header>
 
-    <!-- Toast UI -->
-    <div id="toast-container" class="fixed top-8 right-8 z-[600] space-y-4 pointer-events-none"></div>
+      <main className="max-w-4xl mx-auto space-y-8">
+        {/* Admin Login Modal */}
+        {showAdminLogin && (
+          <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-2xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <Lock className="w-5 h-5 text-emerald-600" /> Admin Access
+                </h3>
+                <button onClick={() => setShowAdminLogin(false)} className="text-slate-400 hover:text-slate-600">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <form onSubmit={handleAdminAuth} className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Secret Password</label>
+                  <input 
+                    type="password"
+                    autoFocus
+                    placeholder="Enter Password"
+                    className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-emerald-500"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                  />
+                </div>
+                <button 
+                  type="submit"
+                  className="w-full bg-emerald-600 text-white py-3 rounded-xl font-bold hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-100"
+                >
+                  Unlock Admin Tools
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
 
-    <script>
-        const SUPABASE_URL = 'https://zhwjrgkkucmifdalcgsg.supabase.co';
-        const SUPABASE_ANON_KEY = 'sb_publishable_T83Yr-DRdL2ZiqCSu2Fnjw_soVm-wMG';
-        const ADMIN_PASSWORD = 'Smith123';
+        {/* Database Error Alert */}
+        {errorState && (
+          <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl flex items-start gap-3 text-rose-700">
+            <AlertCircle className="w-5 h-5 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-bold">Database Message</p>
+              <p className="text-sm opacity-90">{errorState}</p>
+            </div>
+          </div>
+        )}
 
-        let sbClient = null;
-        let polls = [];
-        let view = 'active';
-        let isAdmin = false;
-        let userCountry = localStorage.getItem('user_manual_country') || null;
-        let votedPolls = JSON.parse(localStorage.getItem('voted_polls') || '[]');
-        let cookieConsent = localStorage.getItem('cookie_consent');
+        {/* Admin Section: Create Poll */}
+        {isAdmin && (
+          <section className="bg-white border-2 border-orange-100 rounded-2xl p-6 shadow-sm animate-in fade-in slide-in-from-top-4 duration-500">
+            <h2 className="text-xl font-semibold mb-4 text-orange-700 flex items-center gap-2">
+              <Plus className="w-5 h-5" />
+              Launch New Monthly Poll
+            </h2>
+            <div className="space-y-4">
+              <input 
+                type="text" 
+                placeholder="What's the big question this month?"
+                className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                value={newQuestion}
+                onChange={(e) => setNewQuestion(e.target.value)}
+              />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {newOptions.map((opt, i) => (
+                  <input 
+                    key={i}
+                    type="text" 
+                    placeholder={`Option ${i + 1}`}
+                    className="p-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none transition-all"
+                    value={opt}
+                    onChange={(e) => updateOptionText(i, e.target.value)}
+                  />
+                ))}
+              </div>
+              <div className="flex justify-between items-center pt-2">
+                <button 
+                  onClick={addOptionField}
+                  className="text-sm text-emerald-600 font-semibold hover:text-emerald-700 flex items-center gap-1"
+                >
+                  <Plus className="w-4 h-4" /> Add Option
+                </button>
+                <button 
+                  onClick={createPoll}
+                  disabled={!newQuestion || newOptions.filter(o => o.trim()).length < 2}
+                  className="bg-emerald-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-emerald-700 shadow-lg shadow-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                >
+                  Post to Live Site
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
 
-        function showToast(msg, type = "success") {
-            const container = document.getElementById('toast-container');
-            const toast = document.createElement('div');
-            toast.className = `flex items-center gap-4 p-5 rounded-3xl glass shadow-2xl border-l-4 min-w-[320px] transition-all duration-300 ${type === 'success' ? 'border-emerald-500' : 'border-rose-500'}`;
-            toast.innerHTML = `<div class="font-bold text-sm text-slate-800">${msg}</div>`;
-            container.appendChild(toast);
-            setTimeout(() => { 
-                toast.classList.add('opacity-0', 'translate-x-10'); 
-                setTimeout(() => toast.remove(), 400); 
-            }, 3000);
-        }
+        {/* Poll Listing */}
+        <div className="space-y-6">
+          {loading ? (
+            <div className="flex flex-col items-center py-20 text-slate-400">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-600 mb-4"></div>
+              Refreshing polls...
+            </div>
+          ) : (
+            (view === 'active' ? activePolls : archivedPolls).map((poll) => (
+              <div key={poll.id} className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden transition-all hover:border-emerald-200">
+                <div className="p-6">
+                  <div className="flex justify-between items-start mb-6">
+                    <div>
+                      <span className="text-xs font-bold uppercase tracking-widest text-emerald-500 mb-1 block">
+                        {poll.month || 'Poll'}
+                      </span>
+                      <h3 className="text-2xl font-bold text-slate-800 leading-tight">{poll.question}</h3>
+                    </div>
+                    {isAdmin && (
+                      <div className="flex gap-1">
+                        <button 
+                          onClick={() => togglePollStatus(poll.id, poll.active)}
+                          className={`p-2 rounded-lg transition-colors ${poll.active ? 'text-slate-400 hover:bg-slate-100' : 'text-emerald-600 hover:bg-emerald-50'}`}
+                          title={poll.active ? "Archive Poll" : "Re-activate Poll"}
+                        >
+                          {poll.active ? <Archive className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
+                        </button>
+                        <button 
+                          onClick={() => deletePoll(poll.id)}
+                          className="p-2 text-rose-400 hover:bg-rose-50 hover:text-rose-600 rounded-lg transition-colors"
+                        >
+                          <Trash2 className="w-5 h-5" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
-        async function initApp() {
-            lucide.createIcons();
-            sbClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-            if (!userCountry) await detectLocation();
-            
-            if (!cookieConsent) {
-                document.getElementById('cookie-banner').classList.remove('hidden');
-            }
+                  <div className="space-y-4">
+                    {poll.options.map((option, idx) => {
+                      const percentage = poll.total_votes > 0 ? Math.round((option.votes / poll.total_votes) * 100) : 0;
+                      const hasVoted = votedPolls.has(poll.id) || !poll.active;
 
-            updateLocationUI();
-            fetchPolls();
-            setupRealtime();
-        }
-
-        // Admin Management
-        function openAdminModal() {
-            if (isAdmin) {
-                logoutAdmin();
-                return;
-            }
-            const modal = document.getElementById('admin-modal');
-            const content = document.getElementById('modal-content');
-            modal.classList.remove('hidden');
-            setTimeout(() => {
-                content.classList.remove('scale-95', 'opacity-0');
-                document.getElementById('admin-pass-input').focus();
-            }, 10);
-        }
-
-        function closeAdminModal() {
-            const modal = document.getElementById('admin-modal');
-            const content = document.getElementById('modal-content');
-            content.classList.add('scale-95', 'opacity-0');
-            setTimeout(() => modal.classList.add('hidden'), 300);
-        }
-
-        function verifyAdmin() {
-            const pass = document.getElementById('admin-pass-input').value;
-            if (pass === ADMIN_PASSWORD) {
-                isAdmin = true;
-                document.getElementById('admin-panel').classList.remove('hidden');
-                document.getElementById('admin-trigger').classList.add('bg-emerald-600');
-                closeAdminModal();
-                showToast("Admin access granted.");
-                document.getElementById('admin-pass-input').value = '';
-                renderPolls();
-            } else {
-                showToast("Incorrect password", "error");
-                document.getElementById('admin-pass-input').classList.add('border-rose-500');
-                setTimeout(() => document.getElementById('admin-pass-input').classList.remove('border-rose-500'), 1000);
-            }
-        }
-
-        function logoutAdmin() {
-            isAdmin = false;
-            document.getElementById('admin-panel').classList.add('hidden');
-            document.getElementById('admin-trigger').classList.remove('bg-emerald-600');
-            showToast("Logged out from admin");
-            renderPolls();
-        }
-
-        // Business Logic
-        function handleCookie(accept) {
-            cookieConsent = accept ? 'accepted' : 'declined';
-            localStorage.setItem('cookie_consent', cookieConsent);
-            document.getElementById('cookie-banner').classList.add('hidden');
-            renderPolls();
-        }
-
-        async function detectLocation() {
-            try {
-                const res = await fetch('https://ipapi.co/json/');
-                const data = await res.json();
-                userCountry = data.country_code || null;
-                updateLocationUI();
-            } catch (e) { }
-        }
-
-        async function fetchPolls() {
-            const { data, error } = await sbClient.from('polls').select('*').order('created_at', { ascending: false });
-            if (!error) { 
-                polls = data || []; 
-                renderPolls(); 
-            }
-        }
-
-        function setupRealtime() {
-            sbClient.channel('db-changes').on('postgres_changes', { event: '*', schema: 'public', table: 'polls' }, () => fetchPolls()).subscribe();
-        }
-
-        async function vote(pollId, idx) {
-            if (cookieConsent === 'declined') return showToast("Please accept cookies to vote", "error");
-            if (!cookieConsent) return document.getElementById('cookie-banner').classList.remove('hidden');
-            
-            const poll = polls.find(p => p.id === pollId);
-            if (votedPolls.includes(pollId)) return;
-
-            const updatedOptions = [...poll.options];
-            updatedOptions[idx].votes += 1;
-            
-            const { error } = await sbClient.from('polls').update({ 
-                options: updatedOptions, 
-                total_votes: (poll.total_votes || 0) + 1 
-            }).eq('id', pollId);
-
-            if (!error) {
-                votedPolls.push(pollId);
-                localStorage.setItem('voted_polls', JSON.stringify(votedPolls));
-                renderPolls();
-                showToast("Vote recorded!");
-            }
-        }
-
-        async function toggleStatus(id, current) {
-            if (!isAdmin) return;
-            await sbClient.from('polls').update({ active: !current }).eq('id', id);
-        }
-
-        async function deletePoll(id) {
-            if (!isAdmin) return;
-            if (confirm("Delete this poll permanently?")) {
-                await sbClient.from('polls').delete().eq('id', id);
-            }
-        }
-
-        function renderPolls() {
-            const container = document.getElementById('polls-list');
-            const filtered = polls.filter(p => view === 'active' ? p.active : !p.active);
-
-            if (filtered.length === 0) {
-                container.innerHTML = `<div class="col-span-full py-20 text-center text-slate-400 font-bold">No ${view} polls found.</div>`;
-                return;
-            }
-
-            container.innerHTML = filtered.map(poll => {
-                const total = poll.total_votes || 0;
-                const hasVoted = votedPolls.includes(poll.id);
-                const isBlocked = cookieConsent === 'declined';
-
-                return `
-                    <div class="poll-card glass rounded-[2.5rem] p-8 flex flex-col border border-slate-200 relative group">
-                        ${isAdmin ? `
-                            <div class="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <button onclick="toggleStatus('${poll.id}', ${poll.active})" class="p-2 bg-white shadow-sm border rounded-xl hover:text-emerald-500">
-                                    <i data-lucide="${poll.active ? 'archive' : 'check-circle'}" class="w-4 h-4"></i>
-                                </button>
-                                <button onclick="deletePoll('${poll.id}')" class="p-2 bg-white shadow-sm border rounded-xl hover:text-rose-500">
-                                    <i data-lucide="trash-2" class="w-4 h-4"></i>
-                                </button>
+                      return (
+                        <div key={idx} className="relative h-14">
+                          <button
+                            disabled={hasVoted}
+                            onClick={() => handleVote(poll.id, idx)}
+                            className={`w-full h-full relative z-10 px-5 rounded-xl border text-left transition-all flex items-center justify-between font-semibold ${
+                              hasVoted 
+                                ? 'border-transparent cursor-default' 
+                                : 'border-slate-200 hover:border-emerald-500 hover:bg-emerald-50'
+                            }`}
+                          >
+                            <span className={hasVoted ? 'text-slate-800' : 'text-slate-600'}>
+                              {option.text}
+                            </span>
+                            {hasVoted && (
+                              <span className="text-sm font-black text-emerald-700 bg-white/50 px-2 py-0.5 rounded-md">{percentage}%</span>
+                            )}
+                            {!hasVoted && (
+                              <ChevronRight className="w-4 h-4 text-emerald-300" />
+                            )}
+                          </button>
+                          
+                          {/* Progress Bar Background */}
+                          {hasVoted && (
+                            <div className="absolute inset-0 z-0 bg-slate-100 rounded-xl overflow-hidden">
+                              <div 
+                                className={`h-full transition-all duration-700 ease-out rounded-r-lg ${poll.active ? 'bg-emerald-200' : 'bg-slate-300'}`}
+                                style={{ width: `${percentage}%` }}
+                              />
                             </div>
-                        ` : ''}
-                        
-                        <div class="mb-6 space-y-1">
-                            <span class="text-[10px] font-black uppercase text-emerald-600 tracking-widest">${poll.month || 'Poll'}</span>
-                            <h3 class="text-xl font-extrabold text-slate-900 leading-tight">${poll.question}</h3>
+                          )}
                         </div>
+                      );
+                    })}
+                  </div>
 
-                        <div class="space-y-3 flex-1">
-                            ${poll.options.map((opt, i) => {
-                                const perc = total > 0 ? Math.round((opt.votes / total) * 100) : 0;
-                                const showResults = hasVoted || !poll.active;
-                                return `
-                                    <button onclick="vote('${poll.id}', ${i})" ${showResults || isBlocked ? 'disabled' : ''} class="group relative w-full h-14 rounded-2xl overflow-hidden border border-slate-100 bg-white text-left transition-all">
-                                        <div class="progress-fill absolute inset-0 bg-emerald-500/10" style="width: ${showResults ? perc : 0}%"></div>
-                                        <div class="relative z-10 px-5 flex items-center justify-between font-bold text-sm">
-                                            <span class="${showResults ? 'text-slate-800' : 'text-slate-500 group-hover:text-emerald-600'}">${opt.text}</span>
-                                            ${showResults ? `
-                                                <span class="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-lg text-[11px] font-black">${perc}%</span>
-                                            ` : ''}
-                                        </div>
-                                    </button>
-                                `;
-                            }).join('')}
-                        </div>
-
-                        <div class="mt-8 pt-6 border-t border-slate-100 flex items-center justify-between">
-                            <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">${total} Participants</span>
-                            ${hasVoted ? `<span class="text-[9px] font-bold text-emerald-600 uppercase tracking-tighter">Vote Recorded</span>` : ''}
-                        </div>
+                  <div className="mt-8 pt-4 border-t border-slate-50 flex items-center justify-between text-slate-400 text-sm">
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="w-4 h-4" />
+                        <span className="font-medium text-slate-500">{poll.total_votes || 0} participants</span>
+                      </div>
                     </div>
-                `;
-            }).join('');
-            lucide.createIcons();
-        }
+                    
+                    {!poll.active ? (
+                      <span className="flex items-center gap-1 text-slate-500 font-bold bg-slate-100 px-3 py-1 rounded-full uppercase text-[10px]">
+                        Results Finalized
+                      </span>
+                    ) : votedPolls.has(poll.id) ? (
+                      <span className="text-emerald-600 font-bold flex items-center gap-1 bg-emerald-50 px-3 py-1 rounded-full uppercase text-[10px]">
+                        <CheckCircle2 className="w-3 h-3" /> Thank you for voting
+                      </span>
+                    ) : (
+                      <span className="text-emerald-500 font-bold animate-pulse text-[10px] uppercase">
+                        Vote Now
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
 
-        function setView(v) { 
-            view = v; 
-            document.getElementById('btn-active').className = v === 'active' ? 'px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all bg-white text-slate-900 shadow-sm' : 'px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all text-slate-500';
-            document.getElementById('btn-archive').className = v === 'archive' ? 'px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all bg-white text-slate-900 shadow-sm' : 'px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition-all text-slate-500';
-            renderPolls(); 
-        }
+          {!loading && (view === 'active' ? activePolls : archivedPolls).length === 0 && !errorState && (
+            <div className="text-center py-24 bg-white border-2 border-dashed border-slate-200 rounded-3xl">
+              <BarChart3 className="w-16 h-16 text-slate-200 mx-auto mb-4" />
+              <p className="text-slate-400 font-medium text-lg">No {view} polls for this month.</p>
+              {isAdmin && view === 'active' && (
+                <button 
+                   onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})}
+                   className="mt-4 text-emerald-600 font-bold hover:underline"
+                >
+                  Create one to start the conversation!
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </main>
 
-        function addOptionField() {
-            const container = document.getElementById('poll-options-container');
-            const i = document.createElement('input');
-            i.className = "poll-option-input w-full p-4 bg-white border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-emerald-500";
-            i.placeholder = "New Option";
-            container.appendChild(i);
-        }
-
-        async function createPoll() {
-            const question = document.getElementById('poll-question').value;
-            const month = document.getElementById('poll-month').value;
-            const opts = Array.from(document.querySelectorAll('.poll-option-input')).map(i => ({text: i.value, votes: 0})).filter(o => o.text);
-            
-            if (!question || opts.length < 2) return showToast("Need question and 2 options", "error");
-
-            const { error } = await sbClient.from('polls').insert([{ 
-                question, 
-                options: opts, 
-                active: true, 
-                total_votes: 0, 
-                month 
-            }]);
-            
-            if (!error) {
-                showToast("Poll launched successfully!");
-                document.getElementById('poll-question').value = '';
-                document.getElementById('poll-month').value = '';
-                document.querySelectorAll('.poll-option-input').forEach((input, index) => {
-                    if (index > 1) input.remove();
-                    else input.value = '';
-                });
-            }
-        }
-
-        function updateLocationUI() { document.getElementById('loc-text').innerText = userCountry || "Global"; }
-        function showManualLocation() { const l = prompt("Enter Country Code (e.g. US, GB):"); if(l) { userCountry = l.toUpperCase(); localStorage.setItem('user_manual_country', userCountry); updateLocationUI(); renderPolls(); } }
-
-        window.onload = initApp;
-    </script>
-</body>
-</html>
+      <footer className="max-w-4xl mx-auto mt-20 pb-10 text-center text-slate-400 text-xs border-t border-slate-200 pt-8">
+        &copy; {new Date().getFullYear()} MonthlyPolls • Powered by Supabase Real-time
+      </footer>
+    </div>
+  );
+}
